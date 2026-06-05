@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Octokit } from '@octokit/rest';
-import { supabaseAdmin } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { fetchFilesForContext, commitMultipleFiles, parseGithubUrl } from '@/lib/github';
 import { generateAgentCode } from '@/lib/agent-ai';
 import { resolveModelId, type AiProvider } from '@/lib/ai-models';
@@ -41,7 +41,7 @@ ${setupContext}
 
 async function resolveTask(taskId: string | undefined, agentRole: string | undefined) {
   if (taskId) {
-    const { data: task, error } = await supabaseAdmin
+    const { data: task, error } = await getSupabaseAdmin()
       .from('agent_tasks')
       .select('*, projects(*), agents(*)')
       .eq('id', taskId)
@@ -52,7 +52,7 @@ async function resolveTask(taskId: string | undefined, agentRole: string | undef
 
   if (!agentRole) throw new Error('Task ვერ მოიძებნა. აირჩიე აგენტი ან მიუთითე taskId.');
 
-  const { data: agent, error: agentError } = await supabaseAdmin
+  const { data: agent, error: agentError } = await getSupabaseAdmin()
     .from('agents')
     .select('*')
     .eq('role', agentRole)
@@ -60,7 +60,7 @@ async function resolveTask(taskId: string | undefined, agentRole: string | undef
 
   if (agentError || !agent) throw new Error(`აგენტი "${agentRole}" ვერ მოიძებნა`);
 
-  const { data: project, error: projectError } = await supabaseAdmin
+  const { data: project, error: projectError } = await getSupabaseAdmin()
     .from('projects')
     .select('*')
     .limit(1)
@@ -68,7 +68,7 @@ async function resolveTask(taskId: string | undefined, agentRole: string | undef
 
   if (projectError || !project) throw new Error('Project ვერ მოიძებნა Supabase-ში');
 
-  const { data: newTask, error: createError } = await supabaseAdmin
+  const { data: newTask, error: createError } = await getSupabaseAdmin()
     .from('agent_tasks')
     .insert({
       project_id: project.id,
@@ -209,7 +209,7 @@ export async function POST(request: Request) {
     const task = await resolveTask(body.taskId, agentRole);
     taskId = task.id;
 
-    await supabaseAdmin.from('agent_tasks').update({ status: 'running' }).eq('id', taskId);
+    await getSupabaseAdmin().from('agent_tasks').update({ status: 'running' }).eq('id', taskId);
 
     const octokit = new Octokit({ auth: process.env.GITHUB_PAT });
     const { owner, repo } = parseGithubUrl(task.projects.github_repo_url);
@@ -252,7 +252,7 @@ export async function POST(request: Request) {
       `ეს Pull Request შექმნილია **${task.agents.name}** აგენტის მიერ.\n\n**დავალება:** ${userTask}`
     );
 
-    await supabaseAdmin.from('agent_tasks').update({
+    await getSupabaseAdmin().from('agent_tasks').update({
       status: 'success',
       pull_request_url: prUrl,
       completed_at: new Date().toISOString(),
@@ -264,7 +264,7 @@ export async function POST(request: Request) {
     console.error("Agent Run Error:", error);
     // ერორის დაფიქსირება ბაზაში
     if (taskId) {
-      await supabaseAdmin.from('agent_tasks').update({
+      await getSupabaseAdmin().from('agent_tasks').update({
         status: 'failed',
         logs: error.message,
         completed_at: new Date().toISOString(),
