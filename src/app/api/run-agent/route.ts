@@ -3,6 +3,7 @@ import { Octokit } from '@octokit/rest';
 import { supabaseAdmin } from '@/lib/supabase';
 import { fetchFilesForContext, commitMultipleFiles, parseGithubUrl } from '@/lib/github';
 import { generateAgentCode } from '@/lib/agent-ai';
+import { resolveModelId, type AiProvider } from '@/lib/ai-models';
 
 const SETUP_REPO_OWNER = process.env.SETUP_REPO_OWNER || 'nukriotarashvili';
 const SETUP_REPO_NAME = process.env.SETUP_REPO_NAME || 'set-up-ai';
@@ -116,6 +117,7 @@ async function runDirectAgent(body: {
   userTask: string;
   systemPrompt: string;
   provider?: string;
+  modelId?: string;
   agentRole?: string;
 }) {
   const filePaths = parseTargetFiles(body.targetFiles);
@@ -134,8 +136,15 @@ async function runDirectAgent(body: {
   const setupContext = await fetchSetupContext(octokit);
   const combinedSystemPrompt = buildCombinedSystemPrompt(body.systemPrompt, setupContext);
 
-  const provider = (body.provider === 'claude' ? 'claude' : 'gemini') as 'gemini' | 'claude';
-  const aiResult = await generateAgentCode(provider, combinedSystemPrompt, body.userTask, codeContext);
+  const provider = (body.provider === 'claude' ? 'claude' : 'gemini') as AiProvider;
+  const modelId = resolveModelId(body.modelId, provider);
+  const aiResult = await generateAgentCode(
+    provider,
+    modelId,
+    combinedSystemPrompt,
+    body.userTask,
+    codeContext
+  );
 
   if (!aiResult?.files || !Array.isArray(aiResult.files) || aiResult.files.length === 0) {
     throw new Error('AI-მ არ დააბრუნა ცვლილებები (ცარიელი პასუხი). სცადეთ ინსტრუქციის დაკონკრეტება.');
@@ -190,6 +199,7 @@ export async function POST(request: Request) {
         userTask,
         systemPrompt,
         provider: body.provider,
+        modelId: body.modelId,
         agentRole,
       });
 
@@ -209,8 +219,15 @@ export async function POST(request: Request) {
     const setupContext = await fetchSetupContext(octokit);
     const combinedSystemPrompt = buildCombinedSystemPrompt(task.agents.system_prompt, setupContext);
 
-    const provider = (body.provider === 'claude' ? 'claude' : 'gemini') as 'gemini' | 'claude';
-    const aiResult = await generateAgentCode(provider, combinedSystemPrompt, userTask, codeContext);
+    const provider = (body.provider === 'claude' ? 'claude' : 'gemini') as AiProvider;
+    const modelId = resolveModelId(body.modelId, provider);
+    const aiResult = await generateAgentCode(
+      provider,
+      modelId,
+      combinedSystemPrompt,
+      userTask,
+      codeContext
+    );
 
     if (!aiResult?.files || !Array.isArray(aiResult.files) || aiResult.files.length === 0) {
       throw new Error('AI-მ არ დააბრუნა ცვლილებები (ცარიელი პასუხი). სცადეთ ინსტრუქციის დაკონკრეტება.');

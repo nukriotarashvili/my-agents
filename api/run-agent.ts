@@ -7,13 +7,15 @@ import {
   parseGithubUrl,
 } from '../src/lib/github';
 import { generateAgentCode } from '../src/lib/agent-ai';
+import { resolveModelId, type AiProvider } from '../src/lib/ai-models';
 
-type Provider = 'claude' | 'gemini';
+type Provider = AiProvider;
 
 interface RunAgentBody {
   repoUrl: string;
   targetFiles: string[];
   provider: Provider;
+  modelId: string;
   systemPrompt: string;
   userTask: string;
   branch?: string;
@@ -88,6 +90,9 @@ function validateBody(body: unknown): RunAgentBody {
   if (data.provider !== 'claude' && data.provider !== 'gemini') {
     throw new Error("provider უნდა იყოს 'claude' ან 'gemini'");
   }
+  if (!data.modelId?.trim()) throw new Error('modelId აუცილებელია');
+  resolveModelId(data.modelId.trim(), data.provider);
+
   if (!data.systemPrompt?.trim()) throw new Error('systemPrompt აუცილებელია');
   if (!data.userTask?.trim()) throw new Error('userTask აუცილებელია');
 
@@ -95,6 +100,7 @@ function validateBody(body: unknown): RunAgentBody {
     repoUrl: data.repoUrl.trim(),
     targetFiles: data.targetFiles,
     provider: data.provider,
+    modelId: data.modelId.trim(),
     systemPrompt: data.systemPrompt.trim(),
     userTask: data.userTask.trim(),
     branch: data.branch?.trim() || 'main',
@@ -116,6 +122,7 @@ async function runAgentWorkflow(body: RunAgentBody): Promise<{ prUrl: string }> 
 
   const aiResult = await generateAgentCode(
     body.provider,
+    body.modelId,
     body.systemPrompt,
     body.userTask,
     codeContext
@@ -143,7 +150,7 @@ async function runAgentWorkflow(body: RunAgentBody): Promise<{ prUrl: string }> 
     normalizedFiles,
     commitMessage,
     `✨ AI Update`,
-    `**Task:** ${body.userTask}\n\n**Provider:** ${body.provider}\n\n**Files changed:** ${normalizedFiles.length}`
+    `**Task:** ${body.userTask}\n\n**Provider:** ${body.provider}\n\n**Model:** ${body.modelId}\n\n**Files changed:** ${normalizedFiles.length}`
   );
 
   return { prUrl };

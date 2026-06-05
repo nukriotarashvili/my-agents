@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Play,
@@ -20,12 +20,15 @@ import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
 import { GlassCard } from '@/components/GlassCard';
 import { AGENT_ROLES, type AgentRoleKey } from '@/lib/agent-roles';
+import type { AiModel } from '@/lib/ai-models';
 
 const SplineBackground = dynamic(() => import('@/components/SplineBackground'), {
   ssr: false,
@@ -48,10 +51,12 @@ function filterCodeFiles(files: string[]) {
 }
 
 export function Dashboard() {
-  const [provider, setProvider] = useState('gemini');
+  const [availableModels, setAvailableModels] = useState<AiModel[]>([]);
+  const [loadingModels, setLoadingModels] = useState(true);
+  const [modelId, setModelId] = useState<string | undefined>(undefined);
   const [agentRole, setAgentRole] = useState<AgentRoleKey | undefined>(undefined);
   const [userTask, setUserTask] = useState('');
-  const [repoUrl, setRepoUrl] = useState('https://github.com/nukriotarashvili/sales-app');
+  const [repoUrl, setRepoUrl] = useState('');
   const [branch, setBranch] = useState('main');
   const [repoFiles, setRepoFiles] = useState<string[]>([]);
   const [targetFiles, setTargetFiles] = useState<string[]>([]);
@@ -59,6 +64,50 @@ export function Dashboard() {
   const [scanning, setScanning] = useState(false);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<StatusState>({ type: 'idle' });
+
+  const selectedModel = availableModels.find((model) => model.id === modelId);
+  const provider = selectedModel?.provider ?? 'gemini';
+  const claudeModels = availableModels.filter((model) => model.provider === 'claude');
+  const geminiModels = availableModels.filter((model) => model.provider === 'gemini');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadModels() {
+      setLoadingModels(true);
+      try {
+        const response = await fetch('/api/get-models');
+        const data = await response.json();
+
+        if (!response.ok || !Array.isArray(data.models)) {
+          throw new Error(data.error || 'მოდელების ჩატვირთვა ვერ მოხერხდა');
+        }
+
+        if (cancelled) return;
+
+        const models = data.models as AiModel[];
+        setAvailableModels(models);
+
+        const defaultModel =
+          models.find((model) => model.id === 'gemini-2.5-flash') ??
+          models.find((model) => model.provider === 'gemini') ??
+          models[0];
+
+        if (defaultModel) setModelId(defaultModel.id);
+      } catch {
+        if (!cancelled) {
+          setStatus({ type: 'error', message: 'AI მოდელების ჩატვირთვა ვერ მოხერხდა.' });
+        }
+      } finally {
+        if (!cancelled) setLoadingModels(false);
+      }
+    }
+
+    loadModels();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredFiles = repoFiles.filter((file) =>
     file.toLowerCase().includes(searchQuery.toLowerCase())
@@ -111,10 +160,10 @@ export function Dashboard() {
   };
 
   const handleRunAgent = async () => {
-    if (!agentRole || !userTask.trim() || targetFiles.length === 0) {
+    if (!agentRole || !userTask.trim() || targetFiles.length === 0 || !modelId) {
       setStatus({
         type: 'error',
-        message: 'აირჩიეთ აგენტი, მინიმუმ ერთი ფაილი და შეავსეთ ინსტრუქცია.',
+        message: 'აირჩიეთ მოდელი, აგენტი, მინიმუმ ერთი ფაილი და შეავსეთ ინსტრუქცია.',
       });
       return;
     }
@@ -132,6 +181,7 @@ export function Dashboard() {
           repoUrl: repoUrl.trim(),
           branch: branch.trim() || 'main',
           provider,
+          modelId,
           agentRole,
           systemPrompt: roleConfig.systemPrompt,
           userTask: userTask.trim(),
@@ -153,7 +203,7 @@ export function Dashboard() {
     }
   };
 
-  const isBusy = scanning || running;
+  const isBusy = scanning || running || loadingModels;
 
   return (
     <div className="relative min-h-screen bg-[#0a0a0b] text-zinc-300 overflow-hidden font-mono selection:bg-purple-500/30">
@@ -312,15 +362,45 @@ export function Dashboard() {
             >
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                  AI Provider
+                  AI Engine
                 </label>
-                <Select value={provider} onValueChange={setProvider} disabled={isBusy}>
-                  <SelectTrigger className="bg-black/50 border-white/10 text-white focus:ring-emerald-500/50">
-                    <SelectValue placeholder="აირჩიე პროვაიდერი" />
+                <Select
+                  value={modelId}
+                  onValueChange={setModelId}
+                  disabled={isBusy || loadingModels || availableModels.length === 0}
+                >
+                  <SelectTrigger className="w-full bg-black/50 border-white/10 text-white focus:ring-emerald-500/50">
+                    <SelectValue
+                      placeholder={
+                        loadingModels ? 'Loading models...' : 'აირჩიე AI მოდელი'
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent className="bg-[#121214] border-white/10 text-white">
-                    <SelectItem value="gemini">Gemini 1.5 Pro</SelectItem>
-                    <SelectItem value="claude">Claude 3.5 Sonnet</SelectItem>
+                    {claudeModels.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="text-purple-400/80 text-xs uppercase tracking-wider px-2">
+                          Anthropic
+                        </SelectLabel>
+                        {claudeModels.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>
+                            {model.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                    {geminiModels.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="text-emerald-400/80 text-xs uppercase tracking-wider px-2">
+                          Google Gemini
+                        </SelectLabel>
+                        {geminiModels.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>
+                            {model.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
