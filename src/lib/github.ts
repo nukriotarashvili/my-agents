@@ -74,18 +74,43 @@ export async function commitMultipleFiles(
   const { data: commitData } = await octokit.git.getCommit({ owner, repo, commit_sha: baseCommitSha });
   const baseTreeSha = commitData.tree.sha;
 
-  // ფაილების (Blobs) შექმნა
-  const treeItems = await Promise.all(
+  // 3. Blobs ყველა ახალი/შეცვლილი ფაილისთვის
+  const treeItemsRaw = await Promise.all(
     files.map(async (file) => {
+      if (!file.path || typeof file.content !== 'string') return null;
+
       const { data: blobData } = await octokit.git.createBlob({
-        owner, repo, content: file.content, encoding: 'utf-8',
+        owner,
+        repo,
+        content: file.content,
+        encoding: 'utf-8',
       });
-      return { path: file.path, mode: '100644' as const, type: 'blob' as const, sha: blobData.sha };
+
+      return {
+        path: file.path,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        sha: blobData.sha,
+      };
     })
   );
 
-  // ახალი Tree და Commit
-  const { data: newTree } = await octokit.git.createTree({ owner, repo, tree: treeItems, base_tree: baseTreeSha });
+  const validTreeItems = treeItemsRaw.filter(
+    (item): item is NonNullable<typeof item> => item !== null
+  );
+
+  if (validTreeItems.length === 0) {
+    throw new Error('ვერ მოხერხდა Git Tree ობიექტების გენერაცია.');
+  }
+
+  // 4. ახალი Tree
+  const { data: newTree } = await octokit.git.createTree({
+    owner,
+    repo,
+    tree: validTreeItems,
+    base_tree: baseTreeSha,
+  });
+
   const { data: newCommit } = await octokit.git.createCommit({
     owner, repo, message: commitMessage, tree: newTree.sha, parents: [baseCommitSha],
   });
